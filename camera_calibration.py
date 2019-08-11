@@ -11,7 +11,7 @@ import glob
 def cal_cam(folder='camera_cal', nx=9, ny=6):
     """ Find camera calibration matrix from a set of chassboard images
 
-    :return:
+    :return: Calibration Matrix and Distortion coefficients
     """
     # Make a list of calibration images
     images = glob.glob(folder + '\calibration*.jpg')
@@ -49,42 +49,23 @@ def cal_cam(folder='camera_cal', nx=9, ny=6):
 
 
 def undist_image(img, mtx, dist):
-    """ Undistort an image based on a previously calculated distortion matrix
+    """ Undistort an image based on a calibration matrix and distortion coefficients
 
-    :param img:
-    :param mtx:
-    :param dist:
-    :return:
+    :param img: Distorted image
+    :param mtx: Calibration matrix
+    :param dist: Distortion coefficients
+    :return: Undistorted image
     """
     return cv2.undistort(img, mtx, dist, None, mtx)
 
 
-def warp_perspective(img, nx=9, ny=5):
-    """ Warp perspective of img to birdseye view.
+def warp(img, calibrate=True):
+    """ Unwarp and image to a top down birds eye perspective.
 
-    :param img:
-    :param nx:
-    :param ny:
-    :return: Image with warped perspective.
+    :param img: Image to warp
+    :param calibrate: Boolean parameter that turns on plotting of source and destination points
+    :return: unwarped image
     """
-    # We need to detect 4 corners that define a rectangle here.
-    src = np.float32([corners[0], corners[nx - 1], corners[-nx], corners[-1]])
-    # c) define 4 destination points dst = np.float32([[,],[,],[,],[,]])
-    y, x = img.shape
-    offset = 100
-    dst = np.float32([[offset, offset],
-                      [x - offset, offset],
-                      [offset, y - offset],
-                      [x - offset, y - offset]])
-    # d) use cv2.getPerspectiveTransform() to get M, the transform matrix
-    M = cv2.getPerspectiveTransform(src, dst)
-    # e) use cv2.warpPerspective() to warp your image to a top-down view
-    img_size = (img.shape[1], img.shape[0])
-    warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)
-    return warped
-
-
-def unwarp(img, calibrate=True):
     y, x = img.shape
     offset = 100
     # define 4 source points src = np.float32([[,],[,],[,],[,]])
@@ -113,8 +94,19 @@ def unwarp(img, calibrate=True):
 
 
 def color_threshold(img, s_thresh=(120, 255), sx_thresh=(20, 100)):
+    """Perform a color and gradient thresholding and return a binary image for the chosen parameters.
+    The image is transformed to HLS color space.
+    An edge detection using the Sobel operator in x direction with a threshold is performed.
+    Also a color threshold is applied in the s channel of the HLS color space.
+    Finally these two binary images are combined with a logical or operation.
+
+    :param img: RGB Image that shall be converted.
+    :param s_thresh: Parameters for color threshold.
+    :param sx_thresh: Parameters for Sobel threshold.
+    :return: Stacked results from both pipelines and combined result from both pipelines.
+    """
     img = np.copy(img)
-    # Convert to HLS color space and separate the V channel
+    # Convert to HLS color space and separate the S channel.
     hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
     l_channel = hls[:, :, 1]
     s_channel = hls[:, :, 2]
@@ -154,7 +146,7 @@ if __name__ == '__main__':
     binary, color_binary = color_threshold(undist_img)
     # Transform to Bird's eye perspective.
     # top_down, perspective_M = corners_unwarp(img, nx, ny, mtx, dist)
-    birdseye, M = unwarp(binary)
+    birdseye, M = warp(binary)
 
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 9))
     f.tight_layout()
