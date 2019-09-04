@@ -178,7 +178,7 @@ def search_around_poly(binary_warped, left_fit, right_fit, visualization=False):
 
 
 class LaneFinder(object):
-    """Class to perform lane extraction on a birds eye image.
+    """Class to perform ego lane extraction on a birds eye image.
 
     Depending on it's previous findings, it will perform a search from scratch using statistics over all pixels,
     or use the previous lane estimate as a prior to find the lane.
@@ -187,6 +187,12 @@ class LaneFinder(object):
     def __init__(self):
         self.left_fit = None
         self.right_fit = None
+        self.x_left = None
+        self.x_right = None
+        self.fit_hist_left = None
+        self.fit_hist_right = None
+        self.x_hist_left = []
+        self.x_hist_right = []
 
     def find_lane(self, binary_warped, visualization=False):
         # Find lane pixels depending on self state
@@ -198,9 +204,11 @@ class LaneFinder(object):
             # If the last calculation failed or was empty, start from scratch again
             self.left_fit, self.right_fit = sliding_window_search(binary_warped, visualization=visualization)
 
+        # Sanity checks here
 
-        # Colors in the left and right lane regions to send out
-        out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
+        # Create an image with lane visualization
+        outstack = np.zeros_like(binary_warped)
+        out_img = np.dstack((outstack, outstack, outstack))
         # Generate x and y values for plotting
         ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
         try:
@@ -210,17 +218,24 @@ class LaneFinder(object):
             print('The function failed to fit a line!')
             left_fitx = 1 * ploty ** 2 + 1 * ploty
             right_fitx = 1 * ploty ** 2 + 1 * ploty
+        lane_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+        lane_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+        lane_pts = np.hstack((lane_left, lane_right))
+        cv2.fillPoly(out_img, np.int_([lane_pts]), (0, 255, 0))
+        # cv2.polylines(out_img, np.int32(lane_left), True, (255, 0, 0), 15)
+        # cv2.polylines(out_img, np.int32(lane_right), True, (255, 0, 0), 15)
 
         return out_img
 
-    def measure_curvature_real(self, img):
+    def measure_lane_geometry(self, img):
         # Define conversions in x and y from pixels space to meters
         ym_per_pix = 30 / 720  # meters per pixel in y dimension
         xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
 
-        # Define y-value where we want radius of curvature
+        # Define y-value where we want radius of curvature and lane center
         # We'll choose the maximum y-value, corresponding to the bottom of the image
         y_eval = np.max(img.shape[1]) * ym_per_pix
+        cmax = int(img.max())
 
         # Calculation of curvature radii
         left_curverad = (1 + (2 * self.left_fit[0] * y_eval + self.left_fit[1]) ** 2) ** (1.5) / (
@@ -228,4 +243,23 @@ class LaneFinder(object):
         right_curverad = (1 + (2 * self.right_fit[0] * y_eval + self.right_fit[1]) ** 2) ** (1.5) / (
                     2 * np.abs(self.right_fit[0]))
 
-        return left_curverad, right_curverad
+        # Calculation of camera position to lane center
+        left_fitx = self.left_fit[0] * y_eval ** 2 + self.left_fit[1] * y_eval + self.left_fit[2]
+        right_fitx = self.right_fit[0] * y_eval ** 2 + self.right_fit[1] * y_eval + self.right_fit[2]
+        offset_to_lane = (((left_fitx + right_fitx) / 2.) - np.max(img.shape[0])) * xm_per_pix
+
+        # Display calculated radii on image
+        color = (cmax, cmax, cmax)
+        pos_left, pos_right = (50, 50), (50, 100)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fontscale = 1
+        lineType = 2
+        cv2.putText(img, "radius left = {:.1f} m".format(left_curverad),
+                    pos_left, font, fontscale, color, lineType)
+        cv2.putText(img, "radius right = {:.1f} m".format(right_curverad),
+                    pos_right, font, fontscale, color, lineType)
+        cv2.putText(img, "camera offset = {:.1f} m".format(offset_to_lane),
+                    (50, 150), font, fontscale, color, lineType)
+
+        return img, left_curverad, right_curverad
+

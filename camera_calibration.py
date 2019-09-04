@@ -7,10 +7,6 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import glob
 
-mtx = np.array([[1.15851052e+03, 0.00000000e+00, 6.64523827e+02],
-                [0.00000000e+00, 1.15358452e+03, 3.87354892e+02],
-                [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
-dist = np.array([[-2.54643811e-01, 1.57200534e-02, -7.22881479e-04, 6.33060083e-05, -5.73121219e-02]])
 
 def cal_cam(folder='camera_cal', nx=9, ny=6):
     """ Find camera calibration matrix from a set of chassboard images
@@ -64,7 +60,7 @@ def undist_image(img, mtx, dist):
     return cv2.undistort(img, mtx, dist, None, mtx)
 
 
-def warp(img, calibrate=True):
+def warp_to_birdseye(img, calibrate=True):
     """ Unwarp and image to a top down birds eye perspective.
 
     :param img: Image to warp
@@ -72,7 +68,7 @@ def warp(img, calibrate=True):
     :return: unwarped image
     """
     y, x = img.shape
-    offset = 100
+    x_offset, y_offset = 150, 50
     # define 4 source points src = np.float32([[,],[,],[,],[,]])
     # these points were defined by optical inspection of an image with straight lines
     src = np.float32([[x/2 + 66, y - 260],
@@ -80,15 +76,17 @@ def warp(img, calibrate=True):
                       [x/2 - 410, y - 30],
                       [x/2 + 435, y - 30]])
     # define 4 destination points dst = np.float32([[,],[,],[,],[,]])
-    dst = np.float32([[x - offset, offset],
-                      [offset, offset],
-                      [offset, y - offset],
-                      [x - offset, y - offset]])
+    dst = np.float32([[x - x_offset, y_offset],
+                      [x_offset, y_offset],
+                      [x_offset, y - y_offset],
+                      [x - x_offset, y - y_offset]])
     # d) use cv2.getPerspectiveTransform() to get M, the transform matrix
     M = cv2.getPerspectiveTransform(src, dst)
-    # e) use cv2.warpPerspective() to warp your image to a top-down view
-    img_size = (img.shape[1], img.shape[0])
-    warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)
+    M_inv = cv2.getPerspectiveTransform(dst, src)
+
+    # warp image
+    warped = warp(img, M)
+
     if calibrate:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 9))
         ax1.imshow(img, cmap='gray')
@@ -99,7 +97,7 @@ def warp(img, calibrate=True):
         ax2.plot(np.append(dst[:, 0], dst[0, 0]), np.append(dst[:, 1], dst[0, 1]),
                  marker='x', ms=10.0, color='r')
         ax2.set_title("Warped image with destination points")
-    return warped, M
+    return warped, M, M_inv
 
 
 def color_threshold(img, s_thresh=(120, 255), sx_thresh=(20, 100)):
@@ -141,6 +139,17 @@ def color_threshold(img, s_thresh=(120, 255), sx_thresh=(20, 100)):
     return combined_binary, color_binary
 
 
+def warp(img, M):
+    """ Warp an image given a transformation matrix.
+
+    :param img: image to waro
+    :param M: transformation matrix
+    :return: transformed image
+    """
+    img_size = (img.shape[1], img.shape[0])
+    return cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)
+
+
 if __name__ == '__main__':
     from lane_finder import fit_poly
     nx, ny = 9, 6
@@ -157,15 +166,16 @@ if __name__ == '__main__':
     binary, color_binary = color_threshold(undist_img)
     # Transform to Bird's eye perspective.
     # top_down, perspective_M = corners_unwarp(img, nx, ny, mtx, dist)
-    birdseye, M = warp(binary)
+    birdseye, M, Minv = warp_to_birdseye(binary)
 
     from lane_finder import LaneFinder
     lf = LaneFinder()
     # Feed lanefinder previously found fit values
-    lf.left_fit = np.array([0, 0, 1.60436725e+02])
-    lf.right_fit = np.array([0, 0, 1.13855949e+03])
+    # lf.left_fit = np.array([0, 0, 1.60436725e+02])
+    # lf.right_fit = np.array([0, 0, 1.13855949e+03])
     lane_fit_img = lf.find_lane(birdseye, visualization=True)
-    print('Curvature in m: {}'.format(lf.measure_curvature_real(birdseye)))
+    birdseye_with_rad, left_curverad, right_curverad = lf.measure_lane_geometry(birdseye)
+    print('Curvature in m: {}'.format((left_curverad, right_curverad)))
 
     # Plot Undistorted Image
 
