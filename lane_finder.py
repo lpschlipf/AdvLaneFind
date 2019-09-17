@@ -184,40 +184,39 @@ class LaneFinder(object):
     or use the previous lane estimate as a prior to find the lane.
     """
 
-    def __init__(self):
+    def __init__(self, size_history=5):
+        self.size_history = np.int(size_history)
         self.left_fit = None
         self.right_fit = None
-        self.x_left = None
-        self.x_right = None
-        self.fit_hist_left = None
-        self.fit_hist_right = None
-        self.x_hist_left = []
-        self.x_hist_right = []
+        # History containers for smoothing
+        self.left_fit_hist = np.zeros((size_history, 3), dtype=np.object)
+        self.right_fit_hist = np.zeros((size_history, 3), dtype=np.object)
+        self.left_fitx_hist = np.zeros((size_history, 3), dtype=np.object)
+        self.right_fitx_hist = np.zeros((size_history, 3), dtype=np.object)
 
     def find_lane(self, binary_warped, visualization=False):
-        # Find lane pixels depending on self state
-        if self.left_fit is not None and self.right_fit is not None:
-            # If we had a good estimate in the last pipeline run, use this as a starting estimate
+        # Find lane pixels
+        if self.left_fit is not None and self.right_fit is not None and self.check_history():
+            # If we had a good estimate in the history, use the last valid value.
             self.left_fit, self.right_fit = search_around_poly(binary_warped, self.left_fit, self.right_fit,
-                                                              visualization=visualization)
+                                                               visualization=visualization)
         else:
-            # If the last calculation failed or was empty, start from scratch again
+            # If the history shows too many failed fits, start from scratch again.
             self.left_fit, self.right_fit = sliding_window_search(binary_warped, visualization=visualization)
 
-        # Sanity checks here
+        # Sanity checks and write history
+        self.write_history()
+
+        # Smoothing of current values
+        self.smooth()
 
         # Create an image with lane visualization
         outstack = np.zeros_like(binary_warped)
         out_img = np.dstack((outstack, outstack, outstack))
-        # Generate x and y values for plotting
+        # Generate x and y values for plotting.
         ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-        try:
-            left_fitx = self.left_fit[0] * ploty ** 2 + self.left_fit[1] * ploty + self.left_fit[2]
-            right_fitx = self.right_fit[0] * ploty ** 2 + self.right_fit[1] * ploty + self.right_fit[2]
-        except TypeError:
-            print('The function failed to fit a line!')
-            left_fitx = 1 * ploty ** 2 + 1 * ploty
-            right_fitx = 1 * ploty ** 2 + 1 * ploty
+        left_fitx = self.left_fit[0] * ploty ** 2 + self.left_fit[1] * ploty + self.left_fit[2]
+        right_fitx = self.right_fit[0] * ploty ** 2 + self.right_fit[1] * ploty + self.right_fit[2]
         lane_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
         lane_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
         lane_pts = np.hstack((lane_left, lane_right))
@@ -254,12 +253,91 @@ class LaneFinder(object):
         font = cv2.FONT_HERSHEY_SIMPLEX
         fontscale = 1
         lineType = 2
-        cv2.putText(img, "radius left = {:.1f} m".format(left_curverad),
-                    pos_left, font, fontscale, color, lineType)
-        cv2.putText(img, "radius right = {:.1f} m".format(right_curverad),
-                    pos_right, font, fontscale, color, lineType)
+        if left_curverad < 10000.:
+            cv2.putText(img, "radius left = {:.1f} m".format(left_curverad),
+                        pos_left, font, fontscale, color, lineType)
+        else:
+            cv2.putText(img, "radius left = inf",
+                        pos_left, font, fontscale, color, lineType)
+        if right_curverad < 10000.:
+            cv2.putText(img, "radius right = {:.1f} m".format(right_curverad),
+                        pos_right, font, fontscale, color, lineType)
+        else:
+            cv2.putText(img, "radius right = inf",
+                        pos_right, font, fontscale, color, lineType)
         cv2.putText(img, "camera offset = {:.1f} m".format(offset_to_lane),
                     (50, 150), font, fontscale, color, lineType)
 
         return img, left_curverad, right_curverad
 
+    def write_history(self, min_lane_width=500.0, offset_b=0.5, offset_c=0.5):
+        """
+        Perform sanity checks on the lane fits and write to history accordingly.
+        """
+        a_left, a_right = self.left_fit[2], self.right_fit[2]
+        b_left, b_right = self.left_fit[1], self.right_fit[1]
+        c_left, c_right = self.left_fit[0], self.right_fit[0]
+        confidence = 0
+        # If we started from big bang add in any case, elementwise comparison due to multidim array
+        if np.any(self.left_fit_hist == 0) or \
+                np.any(self.left_fit_hist == 0):
+            confidence += 4
+        # Check curvature
+        if (c_left < c_right + offset_c * np.abs(c_right)) \
+                and (c_left > c_right - offset_c * np.abs(c_right)):
+            confidence += 1
+        # Check slope
+        if (b_left < b_right + offset_b * np.abs(b_right)) \
+                and (b_left > b_right - offset_b * np.abs(b_right)):
+            confidence += 1
+        # Check lane width in pixels
+        if a_right - a_left > min_lane_width:
+            confidence += 1
+        # Finally check if confidence is high enough and if so add to history,
+        # else put None if there is more than one valid fit in the history
+        if confidence >= 2:
+            self.left_fit_hist[1:] = self.left_fit_hist[:-1]
+            self.left_fit_hist[0] = self.left_fit
+            self.right_fit_hist[1:] = self.right_fit_hist[:-1]
+            self.right_fit_hist[0] = self.right_fit
+        else:
+            if np.where(self.left_fit_hist == None)[0].size < (self.size_history-1)*3:
+                self.left_fit_hist[1:] = self.left_fit_hist[:-1]
+                self.left_fit_hist[0] = [None, None, None]
+            else:
+                # if all the fits in history are unvalid we will add the result anyways.
+                self.left_fit_hist[1:] = self.left_fit_hist[:-1]
+                self.left_fit_hist[0] = self.left_fit
+            if np.where(self.right_fit_hist == None)[0].size < (self.size_history-1)*3:
+                self.right_fit_hist[1:] = self.right_fit_hist[:-1]
+                self.right_fit_hist[0] = [None, None, None]
+            else:
+                # if all the fits in history are unvalid we will add the result anyways.
+                self.right_fit_hist[1:] = self.right_fit_hist[:-1]
+                self.right_fit_hist[0] = self.right_fit
+
+    def check_history(self):
+        """
+        Decide if there are enough good lane finds in the history to search from pior.
+        """
+        if np.where(self.left_fit_hist[:3] == None)[0].size == 3*3:
+            # If the last 3 iterations yielded unvalid fits, return false
+            return False
+        elif np.where(self.right_fit_hist[:3] == None)[0].size == 3*3:
+            # If the last 3 iterations yielded unvalid fits, return false
+            return False
+        else:
+            return True
+
+    def smooth(self):
+        """
+        Performs an average over all valid fit values and stores them
+        in self.left_fit and self.right_fit
+        """
+        valid_fits_left = self.left_fit_hist[np.logical_and(self.left_fit_hist != 0,
+                                                            self.left_fit_hist != None)].reshape(-1, 3)
+        valid_fits_right = self.right_fit_hist[np.logical_and(self.left_fit_hist != 0,
+                                                              self.left_fit_hist != None)].reshape(-1, 3)
+
+        self.left_fit = np.array(np.mean(valid_fits_left, axis=0), dtype=float)
+        self.right_fit = np.array(np.mean(valid_fits_right, axis=0), dtype=float)

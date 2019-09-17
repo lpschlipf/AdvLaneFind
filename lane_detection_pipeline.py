@@ -10,10 +10,8 @@ mtx, dist = cal_cam()
 lf = LaneFinder()
 
 def lane_find_on_image(image):
-    """ A function that takes a colored RGB image and detects and plots lanes on it
-
-    :param image: RGB image.
-    :return: RGB image with detected lanes.
+    """
+    A function that takes a colored RGB image and detects and plots lanes on it
     """
     img = np.copy(image)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -23,7 +21,7 @@ def lane_find_on_image(image):
     lines = lf.find_lane(birdseye)
     lines = warp(lines, Minv)
     lines, left_rad, right_rad = lf.measure_lane_geometry(lines)
-    output_image = cv2.addWeighted(image, 1.0, lines, 0.5, 0.0)
+    output_image = cv2.addWeighted(image, 1.0, lines, 0.3, 0.0)
     return output_image
 
 

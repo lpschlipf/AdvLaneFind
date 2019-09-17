@@ -60,7 +60,7 @@ def undist_image(img, mtx, dist):
     return cv2.undistort(img, mtx, dist, None, mtx)
 
 
-def warp_to_birdseye(img, calibrate=True):
+def warp_to_birdseye(img, calibrate=False):
     """ Unwarp and image to a top down birds eye perspective.
 
     :param img: Image to warp
