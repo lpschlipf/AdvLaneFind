@@ -293,6 +293,8 @@ class LaneFinder(object):
         # Check lane width in pixels
         if a_right - a_left > min_lane_width:
             confidence += 1
+        else:
+            confidence -= 1
         # Finally check if confidence is high enough and if so add to history,
         # else put None if there is more than one valid fit in the history
         if confidence >= 2:
