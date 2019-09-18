@@ -21,6 +21,10 @@ def fit_poly(img_shape, leftx, lefty, rightx, righty):
 
 
 def sliding_window_search(binary_warped, visualization=False):
+    """
+    Fit left and right line using N=9 sliding windows where the next window is recentered based on the mean of the
+    previous window.
+    """
     # Take a histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
     # Find the peak of the left and right halves of the histogram
@@ -116,6 +120,9 @@ def sliding_window_search(binary_warped, visualization=False):
 
 
 def search_around_poly(binary_warped, left_fit, right_fit, visualization=False):
+    """
+    Use a prior fit to search and fit around left and right lines.
+    """
     # Choose the width of the margin around the previous polynomial to search
     margin = 100
 
@@ -125,14 +132,10 @@ def search_around_poly(binary_warped, left_fit, right_fit, visualization=False):
     nonzerox = np.array(nonzero[1])
 
     # Set search area based on supplied polynomials
-    left_lane_inds = ((nonzerox > (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy +
-                                   left_fit[2] - margin)) & (nonzerox < (left_fit[0] * (nonzeroy ** 2) +
-                                                                         left_fit[1] * nonzeroy + left_fit[
-                                                                             2] + margin)))
-    right_lane_inds = ((nonzerox > (right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy +
-                                    right_fit[2] - margin)) & (nonzerox < (right_fit[0] * (nonzeroy ** 2) +
-                                                                           right_fit[1] * nonzeroy + right_fit[
-                                                                               2] + margin)))
+    left_lane_inds = ((nonzerox > (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy + left_fit[2] - margin)) &
+                      (nonzerox < (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy + left_fit[2] + margin)))
+    right_lane_inds = ((nonzerox > (right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy + right_fit[2] - margin)) &
+                       (nonzerox < (right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy + right_fit[2] + margin)))
 
     # Extract left and right line pixel positions
     leftx = nonzerox[left_lane_inds]
@@ -172,16 +175,18 @@ def search_around_poly(binary_warped, left_fit, right_fit, visualization=False):
         ax.imshow(result)
         ax.plot(left_fitx, ploty, color='yellow')
         ax.plot(right_fitx, ploty, color='yellow')
-        ax.set_title('Search around prior fit output')
+        ax.set_title('Search around poly fit output')
 
     return left_fit, right_fit
 
 
 class LaneFinder(object):
-    """Class to perform ego lane extraction on a birds eye image.
+    """
+    Class to perform ego lane extraction on a birds eye image.
 
     Depending on it's previous findings, it will perform a search from scratch using statistics over all pixels,
     or use the previous lane estimate as a prior to find the lane.
+    Also keeps a history of fits, decides if a fit is good enough or not and performs parameter averaging accordingly.
     """
 
     def __init__(self, size_history=5):
@@ -191,8 +196,6 @@ class LaneFinder(object):
         # History containers for smoothing
         self.left_fit_hist = np.zeros((size_history, 3), dtype=np.object)
         self.right_fit_hist = np.zeros((size_history, 3), dtype=np.object)
-        self.left_fitx_hist = np.zeros((size_history, 3), dtype=np.object)
-        self.right_fitx_hist = np.zeros((size_history, 3), dtype=np.object)
 
     def find_lane(self, binary_warped, visualization=False):
         # Find lane pixels
@@ -237,10 +240,9 @@ class LaneFinder(object):
         cmax = int(img.max())
 
         # Calculation of curvature radii
-        left_curverad = (1 + (2 * self.left_fit[0] * y_eval + self.left_fit[1]) ** 2) ** (1.5) / (
-                    2 * np.abs(self.left_fit[0]))
-        right_curverad = (1 + (2 * self.right_fit[0] * y_eval + self.right_fit[1]) ** 2) ** (1.5) / (
-                    2 * np.abs(self.right_fit[0]))
+        left_curverad = (1 + (2 * self.left_fit[0] * y_eval + self.left_fit[1]) ** 2) ** (1.5) / (2 * np.abs(self.left_fit[0]))
+        right_curverad = (1 + (2 * self.right_fit[0] * y_eval + self.right_fit[1]) ** 2) ** (1.5) / (2 * np.abs(self.right_fit[0]))
+        lane_curverad = (left_curverad + right_curverad)/2.
 
         # Calculation of camera position to lane center
         left_fitx = self.left_fit[0] * y_eval ** 2 + self.left_fit[1] * y_eval + self.left_fit[2]
@@ -249,24 +251,18 @@ class LaneFinder(object):
 
         # Display calculated radii on image
         color = (cmax, cmax, cmax)
-        pos_left, pos_right = (50, 50), (50, 100)
+        pos_lane, pos_off = (50, 50), (50, 100)
         font = cv2.FONT_HERSHEY_SIMPLEX
         fontscale = 1
         lineType = 2
-        if left_curverad < 10000.:
-            cv2.putText(img, "radius left = {:.1f} m".format(left_curverad),
-                        pos_left, font, fontscale, color, lineType)
+        if lane_curverad < 10000.:
+            cv2.putText(img, "Lane radius = {:.1f} m".format(lane_curverad),
+                        pos_lane, font, fontscale, color, lineType)
         else:
-            cv2.putText(img, "radius left = inf",
-                        pos_left, font, fontscale, color, lineType)
-        if right_curverad < 10000.:
-            cv2.putText(img, "radius right = {:.1f} m".format(right_curverad),
-                        pos_right, font, fontscale, color, lineType)
-        else:
-            cv2.putText(img, "radius right = inf",
-                        pos_right, font, fontscale, color, lineType)
-        cv2.putText(img, "camera offset = {:.1f} m".format(offset_to_lane),
-                    (50, 150), font, fontscale, color, lineType)
+            cv2.putText(img, "Lane radius = inf",
+                        pos_lane, font, fontscale, color, lineType)
+        cv2.putText(img, "Camera offset = {:.1f} m".format(offset_to_lane),
+                    pos_off, font, fontscale, color, lineType)
 
         return img, left_curverad, right_curverad
 
@@ -294,6 +290,7 @@ class LaneFinder(object):
         if a_right - a_left > min_lane_width:
             confidence += 1
         else:
+            # Penalise a too small lane width
             confidence -= 1
         # Finally check if confidence is high enough and if so add to history,
         # else put None if there is more than one valid fit in the history

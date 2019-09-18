@@ -9,7 +9,8 @@ import glob
 
 
 def cal_cam(folder='camera_cal', nx=9, ny=6):
-    """ Find camera calibration matrix from a set of chassboard images
+    """
+    Find camera calibration matrix from a set of chessboard images
 
     :return: Calibration Matrix and Distortion coefficients
     """
@@ -50,7 +51,8 @@ def cal_cam(folder='camera_cal', nx=9, ny=6):
 
 
 def undist_image(img, mtx, dist):
-    """ Undistort an image based on a calibration matrix and distortion coefficients
+    """
+    Undistort an image based on a calibration matrix and distortion coefficients
 
     :param img: Distorted image
     :param mtx: Calibration matrix
@@ -61,7 +63,8 @@ def undist_image(img, mtx, dist):
 
 
 def warp_to_birdseye(img, calibrate=False):
-    """ Unwarp and image to a top down birds eye perspective.
+    """
+    Unwarp and image to a top down birds eye perspective.
 
     :param img: Image to warp
     :param calibrate: Boolean parameter that turns on plotting of source and destination points
@@ -80,7 +83,7 @@ def warp_to_birdseye(img, calibrate=False):
                       [x_offset, y_offset],
                       [x_offset, y - y_offset],
                       [x - x_offset, y - y_offset]])
-    # d) use cv2.getPerspectiveTransform() to get M, the transform matrix
+    # use cv2.getPerspectiveTransform() to get M, the transform matrix
     M = cv2.getPerspectiveTransform(src, dst)
     M_inv = cv2.getPerspectiveTransform(dst, src)
 
@@ -97,11 +100,25 @@ def warp_to_birdseye(img, calibrate=False):
         ax2.plot(np.append(dst[:, 0], dst[0, 0]), np.append(dst[:, 1], dst[0, 1]),
                  marker='x', ms=10.0, color='r')
         ax2.set_title("Warped image with destination points")
+        fig.tight_layout()
     return warped, M, M_inv
 
 
+def warp(img, M):
+    """
+    Warp an image given a transformation matrix.
+
+    :param img: image to waro
+    :param M: transformation matrix
+    :return: transformed image
+    """
+    img_size = (img.shape[1], img.shape[0])
+    return cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)
+
+
 def color_threshold(img, s_thresh=(120, 255), sx_thresh=(20, 100)):
-    """Perform a color and gradient thresholding and return a binary image for the chosen parameters.
+    """
+    Perform a color and gradient thresholding and return a binary image for the chosen parameters.
     The image is transformed to HLS color space.
     An edge detection using the Sobel operator in x direction with a threshold is performed.
     Also a color threshold is applied in the s channel of the HLS color space.
@@ -139,17 +156,6 @@ def color_threshold(img, s_thresh=(120, 255), sx_thresh=(20, 100)):
     return combined_binary, color_binary
 
 
-def warp(img, M):
-    """ Warp an image given a transformation matrix.
-
-    :param img: image to waro
-    :param M: transformation matrix
-    :return: transformed image
-    """
-    img_size = (img.shape[1], img.shape[0])
-    return cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)
-
-
 if __name__ == '__main__':
     from lane_finder import fit_poly
     nx, ny = 9, 6
@@ -166,7 +172,7 @@ if __name__ == '__main__':
     binary, color_binary = color_threshold(undist_img)
     # Transform to Bird's eye perspective.
     # top_down, perspective_M = corners_unwarp(img, nx, ny, mtx, dist)
-    birdseye, M, Minv = warp_to_birdseye(binary)
+    birdseye, M, Minv = warp_to_birdseye(binary, calibrate=True)
 
     from lane_finder import LaneFinder
     lf = LaneFinder()
@@ -176,6 +182,18 @@ if __name__ == '__main__':
     lane_fit_img = lf.find_lane(birdseye, visualization=True)
     birdseye_with_rad, left_curverad, right_curverad = lf.measure_lane_geometry(birdseye)
     print('Curvature in m: {}'.format((left_curverad, right_curverad)))
+
+    # Plot Undistorted Test Image
+
+    test_image = cv2.imread('camera_cal/calibration1.jpg')
+    undist_test_image = undist_image(test_image, mtx, dist)
+    f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 9))
+    f.tight_layout()
+    ax1.imshow(test_image)
+    ax1.set_title('Original Image')
+    ax2.imshow(undist_test_image)
+    ax2.set_title('Undistorted Image')
+    plt.subplots_adjust(left=0., right=1, top=0.9, bottom=0.)
 
     # Plot Undistorted Image
 
@@ -190,8 +208,8 @@ if __name__ == '__main__':
     # Plot Threshold Image
 
     # f, ax3 = plt.subplots()
-    # ax3.imshow(color_binary)
-    # ax3.set_title("Image after color and gradient thresholding, color encoded")
+    # ax3.imshow(binary, cmap='gray')
+    # ax3.set_title("Binary image after color and gradient thresholding")
 
     # Plot Birdseye Image
 

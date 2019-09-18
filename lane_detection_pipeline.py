@@ -26,7 +26,7 @@ def lane_find_on_image(image):
 
 
 if __name__ == "__main__":
-    write_output = 'output_images/project_video.mp4'
-    clip1 = VideoFileClip("project_video.mp4")
+    write_output = 'output_images/challenge_video.mp4'
+    clip1 = VideoFileClip("challenge_video.mp4")
     write_clip = clip1.fl_image(lane_find_on_image)
     write_clip.write_videofile(write_output, audio=False)
